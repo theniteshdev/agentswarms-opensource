@@ -569,6 +569,20 @@ function compilePatterns(raw: string): RegExp[] {
   return out;
 }
 
+/**
+ * A topic or term as a refusal quotes it: cut to 40 characters. A refusal is
+ * shown to whoever chatted (in a toast, the Inspector, an embedded chat), and
+ * a topic is a line of a field of 2000 characters, so a refusal quoting three
+ * of them whole ran to thousands of characters and covered the screen.
+ */
+export const QUOTED_TOPIC_MAX_LENGTH = 40;
+export function quotedTopic(term: string): string {
+  const chars = Array.from(term);
+  return chars.length > QUOTED_TOPIC_MAX_LENGTH
+    ? `${chars.slice(0, QUOTED_TOPIC_MAX_LENGTH).join("").trimEnd()}…`
+    : term;
+}
+
 function lines(raw: string): string[] {
   return raw
     .split(/\r?\n/)
@@ -656,7 +670,7 @@ export function evaluateInputGuardrails(input: string, g: Guardrails): InputDeci
     if (lower.includes(term)) {
       return {
         allowed: false,
-        reason: `This agent isn't allowed to discuss "${term}".`,
+        reason: `This agent isn't allowed to discuss "${quotedTopic(term)}".`,
         outboundText: input,
         safeText: safe.text,
         redactions: {},
@@ -667,7 +681,7 @@ export function evaluateInputGuardrails(input: string, g: Guardrails): InputDeci
   if (allowed.length > 0 && !allowed.some((t) => lower.includes(t))) {
     return {
       allowed: false,
-      reason: `Input is outside this agent's allowed topics (${allowed.slice(0, 3).join(", ")}${allowed.length > 3 ? "…" : ""}).`,
+      reason: `Input is outside this agent's allowed topics (${allowed.slice(0, 3).map(quotedTopic).join(", ")}${allowed.length > 3 ? "…" : ""}).`,
       outboundText: input,
       safeText: safe.text,
       redactions: {},

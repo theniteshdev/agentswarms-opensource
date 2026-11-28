@@ -2548,7 +2548,12 @@ function RequestResponseInspector({
               <p className="text-[11px] font-semibold text-destructive flex items-center gap-1.5 mb-1">
                 <AlertTriangle className="h-3 w-3" /> Error
               </p>
-              <p className="text-xs text-destructive font-mono break-all">{exchange.error}</p>
+              {/* A few lines, then it scrolls: an error can quote a long
+                  setting (a guardrail's topics), and it pushed the request
+                  and response far down the panel. */}
+              <p className="max-h-48 overflow-y-auto text-xs text-destructive font-mono break-all">
+                {exchange.error}
+              </p>
             </div>
           )}
 

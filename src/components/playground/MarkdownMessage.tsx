@@ -1,9 +1,24 @@
-import { useState, type ReactElement, type ReactNode, isValidElement, Children } from "react";
+import {
+  useEffect,
+  useState,
+  type ReactElement,
+  type ReactNode,
+  isValidElement,
+  Children,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  hasMath,
+  latexDelimitersToDollars,
+  loadedMathPlugins,
+  loadMathPlugins,
+  mathToHtml,
+  type MathPlugins,
+} from "@/lib/markdownMath";
 import { MermaidBlock } from "@/components/playground/MermaidBlock";
 import { lastListNumber, numberedListIndent } from "@/lib/listIndent";
 import { safeUrl } from "@/lib/safeUrl";
@@ -26,6 +41,25 @@ const MARKDOWN_IMAGE_RE =
 
 type Segment = { kind: "text"; value: string } | { kind: "image"; src: string; alt: string };
 
+/** The maths plugins once loaded, for an answer that has maths; else null. */
+function useMathPlugins(content: string): MathPlugins | null {
+  const needed = hasMath(content);
+  const [loaded, setLoaded] = useState(() => loadedMathPlugins());
+  useEffect(() => {
+    if (!needed || loaded) return;
+    let live = true;
+    loadMathPlugins().then(
+      (p) => live && setLoaded(p),
+      // Not loaded (offline, a failed chunk): the answer stays as text.
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [needed, loaded]);
+  return needed ? loaded : null;
+}
+
 function splitImageSegments(content: string): Segment[] {
   const segments: Segment[] = [];
   let lastIndex = 0;
@@ -47,29 +81,32 @@ export function MarkdownMessage({ content }: { content: string }) {
   // Pre-extract image references so very large base64 data URLs render as
   // plain <img> tags and are never lost to markdown link-destination parsing.
   const segments = splitImageSegments(content);
+  const math = useMathPlugins(content);
   return (
     <div
       className={cn(
         "max-w-none min-w-0 text-sm leading-7 text-foreground break-words",
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        // A wide formula scrolls on its own rather than widening the message.
+        "[&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden",
       )}
     >
       {segments.map((seg, i) =>
         seg.kind === "image" ? (
           <RenderedImage key={i} src={seg.src} alt={seg.alt} />
         ) : seg.value.trim() ? (
-          <MarkdownChunk key={i} content={seg.value} />
+          <MarkdownChunk key={i} content={seg.value} math={math} />
         ) : null,
       )}
     </div>
   );
 }
 
-function MarkdownChunk({ content }: { content: string }) {
+function MarkdownChunk({ content, math = null }: { content: string; math?: MathPlugins | null }) {
   return (
     <>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={math ? [remarkGfm, ...math.remark] : [remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         // Allow base64 image data: URLs (Gemini image models return them) —
         // WITHOUT disabling protocol filtering, which is what `(url) => url`
@@ -154,6 +191,10 @@ function MarkdownChunk({ content }: { content: string }) {
           ),
           td: ({ children }) => <td className="px-3 py-2 align-top text-sm">{children}</td>,
           code: ({ className, children, ...props }) => {
+            // Inline maths: remark-math's $$ … $$ within a line.
+            if (typeof className === "string" && className.includes("math-inline")) {
+              return <MathFormula tex={extractText(children)} display={false} />;
+            }
             // Inline code: react-markdown passes no language className for inline.
             const isBlock = typeof className === "string" && /language-/.test(className);
             if (!isBlock) {
@@ -180,9 +221,34 @@ function MarkdownChunk({ content }: { content: string }) {
           ),
         }}
       >
-        {content}
+        {math ? latexDelimitersToDollars(content) : content}
       </ReactMarkdown>
     </>
+  );
+}
+
+/**
+ * A formula, typeset by KaTeX (src/lib/markdownMath.ts). Before KaTeX has
+ * loaded it shows the formula's source, as code.
+ */
+function MathFormula({ tex, display }: { tex: string; display: boolean }) {
+  const html = mathToHtml(tex, display);
+  if (html === null) {
+    return display ? (
+      <pre className="my-3 overflow-x-auto font-mono text-[13px]">{tex}</pre>
+    ) : (
+      <code className="font-mono text-[0.85em]">{tex}</code>
+    );
+  }
+  const Tag = display ? "div" : "span";
+  return (
+    <Tag
+      className={display ? "my-3" : undefined}
+      // KaTeX built this markup from the formula with trust off: the model's
+      // text was parsed and escaped by it, never injected (as MermaidBlock's
+      // SVG is mermaid's, from a strict render).
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 
@@ -215,6 +281,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   // a fallback to plain source when it does not parse) — see MermaidBlock.
   if (language === "mermaid") {
     return <MermaidBlock code={codeText} />;
+  }
+  // A maths block: remark-math's $$ … $$ on lines of their own, or a ```math
+  // fence (GitHub's way to write one).
+  if (language === "math") {
+    return <MathFormula tex={codeText} display />;
   }
 
   const handleCopy = async () => {

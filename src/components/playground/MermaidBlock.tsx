@@ -50,15 +50,19 @@ export function MermaidBlock({ code }: { code: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    setSvg(null);
-    setError(null);
+    // The diagram on screen stays until the new one is drawn: clearing it
+    // first showed "Rendering diagram…" in between, a flash on every change
+    // of the source (an answer still streaming in).
     loadMermaid()
       .then(async (mod) => {
         // parse() first: render() can leave orphan error nodes in the DOM on
         // bad input, parse() fails cleanly.
         await mod.default.parse(code);
         const { svg: rendered } = await mod.default.render(`adhoc-mermaid-${renderSeq++}`, code);
-        if (!cancelled) setSvg(rendered);
+        if (!cancelled) {
+          setSvg(rendered);
+          setError(null);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Invalid diagram syntax");

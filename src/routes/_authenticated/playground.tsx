@@ -469,9 +469,17 @@ function PlaygroundPage() {
 
   // Poll approvals for the selected agent so the guided tour can tick its
   // approval-related checkpoints in near-real-time.
+  //
+  // Stored only when an answer changed: each poll stored a new object, so the
+  // whole page, every message in it, redrew every 4 seconds while nothing
+  // changed (with MarkdownMessage rebuilding each one, a diagram flashed).
+  const storeApprovalSignals = (next: { pending: boolean; decided: boolean }) =>
+    setApprovalSignals((prev) =>
+      prev.pending === next.pending && prev.decided === next.decided ? prev : next,
+    );
   useEffect(() => {
     if (!selectedAgent) {
-      setApprovalSignals({ pending: false, decided: false });
+      storeApprovalSignals({ pending: false, decided: false });
       return;
     }
     let cancelled = false;
@@ -481,7 +489,7 @@ function PlaygroundPage() {
         .select("status")
         .eq("agent_id", selectedAgent);
       if (cancelled || !data) return;
-      setApprovalSignals({
+      storeApprovalSignals({
         pending: data.some((a) => a.status === "pending"),
         decided: data.some((a) => a.status === "approved" || a.status === "rejected"),
       });

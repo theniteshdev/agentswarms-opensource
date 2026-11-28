@@ -41,6 +41,14 @@ export type AssetMetadata = {
    * their names: it is read once more, then reused as before.
    */
   pii_values_read?: boolean;
+  /**
+   * The personal-data rules (PERSONAL_DATA_RULES) its columns were last judged
+   * under, as far as what is stored allows: by a crawl, or by the background
+   * pass that judges stored columns again when the rules change (R559). Unset
+   * on an asset no one has judged since. A column judged from values says on
+   * its own which rules those values were read under.
+   */
+  pii_rules?: number;
   /** Iceberg format version, snapshot count and the like, for a table format. */
   format_version?: number;
   snapshot_count?: number;

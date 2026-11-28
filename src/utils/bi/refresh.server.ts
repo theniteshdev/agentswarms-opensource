@@ -1732,6 +1732,14 @@ export async function runCronPass(opts: { force?: boolean } = {}): Promise<CronP
       () => import("@/utils/catalog/schedule.server").then((m) => m.processDueCatalogCrawls(force)),
       0,
     );
+    // After the crawls: what the catalog stores about personal data, judged
+    // again when the rules have changed since, without reading the data (R559).
+    await step(
+      "catalog-personal-rules",
+      () =>
+        import("@/utils/catalog/personalDataRules.server").then((m) => m.sweepCatalogRules(force)),
+      undefined,
+    );
     // Scheduled ETL pipelines ride the same sweep and lease.
     const etl_runs = await step(
       "etl-scheduler",

@@ -23,6 +23,14 @@ export type WhatsNewEntry = {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "catalog-follows-rules",
+    date: "2026-11-28",
+    title: "Catalog kept up to date",
+    body: "When the personal-data checks improve, columns already in the catalog are checked again on their own, without a new crawl, and a column newly found to be personal no longer keeps a sample.",
+    link: { to: "/docs/data" },
+    cta: "How it works",
+  },
+  {
     id: "password-columns-by-name",
     date: "2026-11-28",
     title: "Password columns found",

@@ -111,6 +111,11 @@ export type CatalogColumn = {
   pii_evidence?: string;
   /** The verdict was read from its values, so a crawl that reads none keeps it (R555). */
   pii_from_values?: boolean;
+  /**
+   * With `pii_from_values`, the rules the values were judged under
+   * (PERSONAL_DATA_RULES); unset means 1, from before R559.
+   */
+  pii_rules?: number;
   /** Curation/AI documentation — preserved across re-crawls. */
   description?: string;
   /** Owner-written tags, merged forward from the previous crawl. */
@@ -186,12 +191,12 @@ export type CrawlStats = {
 // values (lib/sensitiveData), which overrule the name where they can. Since
 // R555 lake files are too: a CSV or JSON file from the sample the crawl
 // already reads, a Parquet file from the first rows of its text columns.
-import { classifyColumn } from "@/lib/sensitiveData";
+import { classifyColumn, nameFindingWithoutValues, PERSONAL_DATA_RULES } from "@/lib/sensitiveData";
 
 /**
  * A column with its personal-data finding set, or cleared when there is none.
  * With values, the verdict is marked as read from them (`pii_from_values`),
- * found or not; with none, it is the name's.
+ * found or not, under which rules; with none, it is the name's.
  */
 function withFinding<C extends CatalogColumn>(c: C, values: readonly unknown[]): C {
   const f = classifyColumn(c.name, values);
@@ -200,12 +205,32 @@ function withFinding<C extends CatalogColumn>(c: C, values: readonly unknown[]):
     pii_kind: _k,
     pii_evidence: _e,
     pii_from_values: _v,
+    pii_rules: _r,
     ...rest
   } = c as C & { values?: unknown };
-  const read = values.length > 0 ? { pii_from_values: true } : {};
+  const read = values.length > 0 ? { pii_from_values: true, pii_rules: PERSONAL_DATA_RULES } : {};
   return f
     ? ({ ...rest, pii: true, pii_kind: f.kind, pii_evidence: f.evidence, ...read } as C)
     : ({ ...rest, ...read } as C);
+}
+
+/** Its values were judged under rules older than the current ones (R559). */
+export function judgedUnderOlderRules(c: Pick<CatalogColumn, "pii_from_values" | "pii_rules">) {
+  return !!c.pii_from_values && (c.pii_rules ?? 1) < PERSONAL_DATA_RULES;
+}
+
+/**
+ * A verdict read from values, kept with no values to read again. Under older
+ * rules, what the name now says is added where those values could not have
+ * said otherwise (see nameFindingWithoutValues); nothing is taken away, and
+ * the column still says which rules its values were read under, so they are
+ * read again when they can be.
+ */
+function keptVerdict(c: CatalogColumn): CatalogColumn {
+  if (c.pii || !judgedUnderOlderRules(c)) return { ...c };
+  const flags = c.type === "boolean" || /^(true|false)$/i.test(c.sample ?? "");
+  const f = nameFindingWithoutValues(c.name, flags);
+  return f ? { ...c, pii: true, pii_kind: f.kind, pii_evidence: f.evidence } : { ...c };
 }
 
 /**
@@ -215,6 +240,9 @@ function withFinding<C extends CatalogColumn>(c: C, values: readonly unknown[]):
  * by its name again would undo what its values showed, a `contact` column of
  * addresses unflagged or an `email_campaign_id` of numbers flagged, every
  * other crawl. The values passed in for this are never stored.
+ *
+ * With no values at all, this is the catalog's stored columns judged again by
+ * the current rules, as far as they can be without reading the data (R559).
  */
 export function classify(
   columns: ReadonlyArray<
@@ -227,7 +255,7 @@ export function classify(
   const out = columns.map((col) => {
     const { values, ...c } = col;
     if (values?.length) return withFinding<CatalogColumn>(c, values);
-    if (c.pii_from_values) return { ...c } as CatalogColumn;
+    if (c.pii_from_values) return keptVerdict(c as CatalogColumn);
     return withFinding<CatalogColumn>(c, []);
   });
   return { columns: out, pii: out.some((c) => c.pii) };
@@ -742,12 +770,13 @@ export async function crawlObjectStorage(
       sampleBudget.has(g) &&
       sampled < MAX_SAMPLES;
     // A file crawled before its values were read for personal data (R555)
-    // holds a verdict from its column names alone. Read it once more while the
-    // budget allows; after that it is reused as before.
+    // holds a verdict from its column names alone, and one whose values were
+    // judged under older rules holds their verdict (R559). Read it once more
+    // while the budget allows; after that it is reused as before.
     const recheck =
       (canSample || g.format === "parquet") &&
       !!reuse &&
-      !reuse.pii_values_read &&
+      (!reuse.pii_values_read || reuse.columns.some(judgedUnderOlderRules)) &&
       sampleBudget.has(g) &&
       sampled < MAX_SAMPLES;
     if (reuse && reuse.columns.length > 0 && !recount && !recheck) {
@@ -822,6 +851,16 @@ export async function crawlObjectStorage(
         // asset, rather than failing the whole crawl over one object.
         console.warn(`[catalog] could not describe ${biggest.key}: ${(e as Error).message}`);
       }
+    }
+    // A file read again only to count or judge it, whose read failed: it has
+    // not changed, so what is held of it stands (R559). It used to be listed
+    // with no columns, which a recheck after a rules change would have done to
+    // every file the bucket refused to hand over that day.
+    if (inferred.length === 0 && reuse && reuse.columns.length > 0) {
+      inferred = reuse.columns;
+      rowEstimate = reuse.row_count;
+      rowsEstimated = reuse.row_count_estimated ?? g.objects.length > 1;
+      valuesRead = reuse.pii_values_read ?? false;
     }
     const partitionKeys = g.partitionKeys ?? [];
     const { columns, pii } = classify(withPartitionColumns(inferred, partitionKeys));
@@ -1096,7 +1135,9 @@ export async function persistAssets(
       description: prev ? prev.description : (a.description ?? null),
       tags: prev ? prev.tags : (a.tags ?? []),
       schema_hash: hash,
-      metadata: (a.metadata ?? {}) as unknown as Json,
+      // Every crawled asset's columns were just judged under the current rules,
+      // as far as what was read allows (R559): the background pass skips it.
+      metadata: { ...(a.metadata ?? {}), pii_rules: PERSONAL_DATA_RULES } as unknown as Json,
       last_crawled_at: now,
     };
   });

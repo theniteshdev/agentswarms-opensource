@@ -23,6 +23,21 @@ import { detectPII, redactPII, type PiiEntity } from "@/utils/guardrails";
 
 export type SensitiveKind = PiiNameKind | "secret";
 
+/**
+ * Which rules this file and lib/piiHeuristic apply (R559). The catalog stores
+ * its verdicts and says which rules made them, so a change here reaches what
+ * was judged before instead of waiting for the data to change: an unchanged
+ * file whose values were judged under older rules is read again, and a
+ * background pass judges again what can be judged without reading.
+ *
+ * Raise it whenever any column would be judged differently. The fingerprint
+ * test (tests/unit/personalDataRules.test.ts) fails until it is raised.
+ * - 1: R521–R557.
+ * - 2: R558. Passwords and tokens by name, a name's last word decides, places
+ *   of birth, values that are all true or false overrule after 3.
+ */
+export const PERSONAL_DATA_RULES = 2;
+
 /** The approvals' action_type for a suggestion to hide a dataset's personal columns. */
 export const HIDE_COLUMNS_ACTION = "dataset.hide_columns";
 
@@ -293,6 +308,31 @@ export function classifyColumn(
     };
   }
   return null;
+}
+
+/**
+ * What a column found to hold nothing personal, when its values were read
+ * under older rules and are not read again, holds by the current rules: what
+ * its name says, where the values read could not have said otherwise (R559).
+ *
+ * Exact from what is known. Values that found no shape and no mention leave the
+ * name to decide, so a `password_hash` of hashes is passwords now. Except:
+ * - an email or IP address always shows its shape, so values that showed none
+ *   may have overruled the name; that waits until they are read again;
+ * - values that are all true or false overrule any name but gender; the values
+ *   are gone, so the column's type or the one value kept of it stands in.
+ *
+ * Only ever adds a finding. A finding the older rules made stays until the
+ * values are read again: dropping it without them could unmark what they found.
+ */
+export function nameFindingWithoutValues(
+  column: string,
+  looksLikeFlags: boolean,
+): SensitiveFinding | null {
+  const kind = piiNameKind(column);
+  if (!kind || SHAPE_ALWAYS.has(kind)) return null;
+  if (looksLikeFlags && kind !== "gender") return null;
+  return classifyColumn(column, []);
 }
 
 /** Every column that looks personal, in the dataset's column order. */

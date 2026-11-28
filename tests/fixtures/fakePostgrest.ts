@@ -1,5 +1,6 @@
 // A small in-memory stand-in for the PostgREST client calls the key code
-// makes (select/eq/neq/gt/is/in/not/or/order, a jsonb key's ->>, insert/update/delete with .select(),
+// makes (select/eq/neq/gt/is/in/not/or/order/limit, a jsonb key's ->>, not.cs on a jsonb object,
+// insert/update/delete with .select(),
 // maybeSingle/single, one rpc), with the unique constraints of migration
 // 20261105000000, so tests run the real keyStore.server and the sweep
 // against tables, not against a mock of each call.
@@ -266,6 +267,20 @@ export function fakePostgrest(seed: Record<string, Row[]> = {}) {
           filters.push((r) => r[col] != null && !re.test(String(r[col])));
         } else if (op === "is") {
           filters.push((r) => (cell(r, col) ?? null) !== v);
+        } else if (op === "cs") {
+          // NOT (a jsonb object @> v): each of v's keys holds the same JSON. A
+          // NULL column leaves the row out, as Postgres does.
+          const want = JSON.parse(String(v)) as Row;
+          filters.push((r) => {
+            const x = r[col];
+            if (x == null) return false;
+            const has =
+              typeof x === "object" &&
+              Object.entries(want).every(
+                ([k, w]) => JSON.stringify((x as Row)[k]) === JSON.stringify(w),
+              );
+            return !has;
+          });
         } else {
           throw new Error(`fakePostgrest: not.${op} is not supported`);
         }
@@ -282,7 +297,8 @@ export function fakePostgrest(seed: Record<string, Row[]> = {}) {
         window = [from, to];
         return q;
       },
-      limit() {
+      limit(n?: number) {
+        if (typeof n === "number") window = [window?.[0] ?? 0, (window?.[0] ?? 0) + n - 1];
         return q;
       },
       maybeSingle() {

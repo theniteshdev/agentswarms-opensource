@@ -645,6 +645,17 @@ function DataPage() {
         it. A rule written later applies to what is already kept; a value comes back only when a
         crawl reads it again with the rule gone.
       </Callout>
+      <Callout kind="why" title="When the personal-data checks improve">
+        Each finding records which version of the checks made it. When they improve, the catalog
+        brings what it already holds up to date on its own, a batch at a time, with no crawl and
+        without reading the data: a column judged by its name is judged by its name again, and one
+        judged from its values keeps that finding and gains what its name now says, where the values
+        could not have said otherwise (a <C>password_hash</C> of hashes is passwords). It never
+        drops a finding its values made; the next crawl reads the values again, once, even from a
+        file that has not changed. A column newly found personal stops keeping its sample. This
+        matters most for a source you crawl only by hand, which would otherwise keep the old
+        findings until you crawled it.
+      </Callout>
       <Callout kind="warn" title="Bucket queries read up to 50,000 rows per file">
         A bucket query is not pushed down. The referenced files are read up to a per-file cap and
         the query runs locally, so a filter does not reduce what is fetched. When a file hits that

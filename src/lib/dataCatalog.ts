@@ -25,6 +25,8 @@ export type CatalogColumn = {
    * judging the column by its name again.
    */
   pii_from_values?: boolean;
+  /** With `pii_from_values`, the rules the values were judged under (R559; unset = 1). */
+  pii_rules?: number;
   /** Column documentation (AI-generated or hand-written); survives re-crawls. */
   description?: string;
   /** Comment ingested from the external catalog (e.g. Unity Catalog). */

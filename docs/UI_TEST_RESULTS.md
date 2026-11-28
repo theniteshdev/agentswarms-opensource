@@ -15,6 +15,18 @@ kept for review.
 
 <!-- newest first -->
 
+## 2026-11-28 — R559: the catalog follows the personal-data rules
+
+Driven on the 8080 stack rebuilt from the R559 working tree, signed in as the owner, on the Data Catalog. The stack's catalog as found: three sources, all crawled by hand only, 72 assets. The warehouse source ("Lakehouse catalog", 59 assets) was last crawled on 2026-10-01, before values were read at all; "MinIO local etl demo" (12 assets) on the morning of this day, its 10 data files judged from their values with no rules recorded. Before the rebuild every stored column was judged with the new code from its stored name, type and flags only (no values read), which predicted one change. Read from the page, and from the database as counts, names and flags only. No fixtures.
+
+| Surface | What was driven | Result |
+| --- | --- | --- |
+| Scheduler, first pass of the new build | Nothing: the app started | App log: `personal data judged again under rules 2: 72 asset(s), 1 changed, 0 crawled meanwhile, 0 failed`. In the database all 72 assets carry the rules; assets marked personal, 1 before and after; no asset's crawl time changed |
+| Data Catalog → `region_managers` (Lakehouse catalog) → its column `manager_email` | The marker beside the column, before the rebuild and after | Before: "Likely personal data." (marked by a crawl of 2026-10-01, which recorded no kind). After: "Personal data: email addresses. Its name suggests email addresses." Sample still `not kept`; "No change to these columns has been recorded" (the pass changes no schema) |
+| Data Catalog → MinIO local etl demo → Re-crawl | Its 10 unchanged data files were judged from values with no rules recorded | The crawl read all 10 again (`sampled: 10`); 72 columns now record the rules their values were read under; no schema change; nothing newly marked |
+| Same, Re-crawl again | Nothing changed since | Read none (`sampled: 0`); every asset still stamped and every column still records its rules |
+| Data Catalog, the other two sources | Not crawled | Stamped by the pass alone, as a source crawled only by hand is meant to be |
+
 ## 2026-11-28 — R558: what a column's name can say
 
 Driven on the 8080 stack rebuilt from the R558 working tree, signed in as the owner, on the dataset pages of three tables already on the stack: `tpcds_sf10tcl_customer` and `tpcds_sf100tcl_call_center` (TPC-DS benchmark data, synthetic) and `sftest_users` (8 rows synced from a test CRM connection). Read from the page's Overview; column names and JSON types only were read from the database. Fixture: one quality check added to `tpcds_sf100tcl_call_center`; deleted with the owner's permission after the round (no checks or results left on it).

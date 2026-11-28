@@ -109,6 +109,25 @@ Never infer it from what rendered.
 
 <!-- newest first -->
 
+### 2026-11-28 — R559: the catalog kept the verdicts of the rules it was crawled under
+
+**Why this round.** R558 changed what a column's name says, and its log noted "nothing stored changes until a crawl". Followed through: the catalog is the one place that stores verdicts, and two ways kept old ones for good.
+
+| Finding | Sev | What was wrong |
+| --- | --- | --- |
+| An unchanged lake file never took new rules | S2 | **Found in scoping.** Since R555 an unchanged file keeps the verdict its values gave rather than being judged by its name again, and nothing said which rules gave it. A CSV of users crawled before R558 kept `password_hash` unmarked, with one hash as its catalog sample, for as long as the file did not change. Each verdict from values now records the rules (`pii_rules`), and a file judged under older ones is read again, once. |
+| A source crawled by hand kept every old verdict | S2 | **Found in scoping.** On this stack the warehouse source was last crawled on 2026-10-01, before values were read at all, and the bucket sources are manual too. The catalog can be shared with people who cannot read the data. A background pass now judges every stored asset again when the rules change, a batch per scheduler pass, without reading the data, and stamps it. |
+| A re-read that failed emptied the asset | S3 | **Found in review.** A file read again only to count it (R512) or judge it (R555), whose read failed, was listed with no columns and overwrote what was held; a rules change would have done that to every file the bucket refused that day. It keeps what was known now. |
+| Nothing tied a rules change to judging again | S3 | **Found in design.** The rules carry a version, and a fingerprint of what they say about the corpus and about columns of values down each path fails the tests until the version is raised. |
+
+**Checked and sound.**
+- **Without values, only what is exact or safe**: a column judged by its name gets the name's current verdict; one judged from values gains what its name now says only where the values could not have said otherwise (not an email or IP name, whose values may have overruled it; not a column typed boolean or whose kept value is true or false). It never loses a finding until its values are read again.
+- **A crawl wins**: the pass writes only if the asset was not crawled since it read it.
+- **Nothing more for an asset under the current rules**: a crawl stamps every asset it writes; the pass's second run writes nothing.
+- **Tenant-safe** with the service role: each row is written from its own content.
+- **On this stack** (UI test): the first pass judged all 72 assets and changed one, a column marked by a crawl of 2026-10-01 that recorded no kind, now "email addresses"; a re-crawl read the 10 files judged under no recorded rules once, the next read none.
+- 22 mutants killed (the stamp on values, unset rules as 1, the comparison, each guard of the kept verdict, the recheck, the failed-read fallback, the crawl's stamp, each exception of the name rule, the pass's filter, crawl guard, kept values, stamp, metadata merge, change count, backlog pacing both ways, the scheduler step). One survived first: the test's true/false sample sat on a name the last-word rule already rules out. Fixed.
+
 ### 2026-11-28 — R558: a column's name said what it pointed at, not what it held
 
 **Why this round.** R557's UI test filed `C_BIRTH_COUNTRY` as "dates of birth". Since R554–R557 a mark of personal data has consequences: the column is put to its owner as one to hide from shares, the catalog keeps no sample of it, and its failing quality checks quote no examples. So the name check, which decides wherever values have no shape, was held to the columns of public schemas: every column of 24 tables from sample databases and two common sign-in schemas, 253 columns (`piiNameCorpus.test.ts`). Before: 35 wrong.

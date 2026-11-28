@@ -351,6 +351,23 @@ development branch and may be ahead of the latest tag.
 
 ### Added
 
+- **The catalog follows the personal-data rules when they change** (R559).
+  The catalog stores what each column holds, and kept the verdict of the
+  rules it was crawled under. A lake file that had not changed was never read
+  again, so R558's rules never reached it, and a source crawled only by hand
+  kept every old verdict: a users table's `password_hash` stayed unmarked,
+  with one hash kept as its sample for everyone the source is shared with.
+  The rules now carry a version, and each verdict records the one that made
+  it. Without anyone crawling, a background pass judges every stored column
+  again as far as that is possible without reading the data: a column judged
+  by its name gets the name's current verdict, and one judged from its values
+  gains what its name now says where those values could not have said
+  otherwise, losing nothing. A newly marked column drops the value the catalog
+  kept of it. The next crawl then reads an unchanged file judged under older
+  rules once more. Also fixed: a file read again only to count or judge it,
+  whose read failed, was listed with no columns; it keeps what was known.
+  A test now fails if what any column is judged to hold changes while the
+  version stays the same.
 - **Password columns found by name, and names that only point at personal
   data left alone** (R558). Held to every column of 24 tables from public
   sample databases and two common sign-in schemas (253 columns), the name
@@ -369,7 +386,8 @@ development branch and may be ahead of the latest tag.
   of only true and false values holds none of it, gender aside. Also found:
   `Fax`, `MiddleName`, `ContactName`, `zip`, numbered columns (`address2`),
   PIN codes, Aadhaar, PAN and national insurance numbers. Columns already in
-  the catalog are judged again on their next crawl.
+  the catalog are judged again on their next crawl (and, since R559, without
+  one).
 - **Quality findings quote no personal values** (R557). A failing `unique`,
   `accepted_values` or `range` check quoted up to three of the values it
   found ("e.g. "ann@…" ×2"), and the alert sent when a dataset's verdict

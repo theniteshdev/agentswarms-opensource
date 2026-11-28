@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useState,
   type ReactElement,
@@ -6,7 +7,7 @@ import {
   isValidElement,
   Children,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, Download } from "lucide-react";
@@ -77,7 +78,14 @@ function splitImageSegments(content: string): Segment[] {
   return segments;
 }
 
-export function MarkdownMessage({ content }: { content: string }) {
+/**
+ * An answer, redrawn only when its text changes: the page around it redraws on
+ * every key pressed in the chat box, and every message used to be read and
+ * drawn again with it.
+ */
+export const MarkdownMessage = memo(MarkdownMessageView);
+
+function MarkdownMessageView({ content }: { content: string }) {
   // Pre-extract image references so very large base64 data URLs render as
   // plain <img> tags and are never lost to markdown link-destination parsing.
   const segments = splitImageSegments(content);
@@ -112,120 +120,124 @@ function MarkdownChunk({ content, math = null }: { content: string; math?: MathP
         // WITHOUT disabling protocol filtering, which is what `(url) => url`
         // did. See safeUrl.
         urlTransform={safeUrl}
-        components={{
-          h1: ({ children }) => (
-            <h1 className="mt-6 mb-3 text-2xl font-semibold tracking-tight border-b border-border/60 pb-2">
-              {children}
-            </h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="mt-6 mb-3 text-xl font-semibold tracking-tight">{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 className="mt-5 mb-2 text-base font-semibold tracking-tight">{children}</h3>
-          ),
-          h4: ({ children }) => (
-            <h4 className="mt-4 mb-2 text-sm font-semibold tracking-tight text-foreground/90">
-              {children}
-            </h4>
-          ),
-          p: ({ children }) => <p className="my-3 text-sm leading-7">{children}</p>,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              // A link within the page (#…, such as a dashboard's #page=)
-              // stays in this tab; any other opens a new one.
-              {...(href?.startsWith("#") ? {} : { target: "_blank", rel: "noreferrer noopener" })}
-              className="text-primary underline underline-offset-2 hover:text-primary/80"
-            >
-              {children}
-            </a>
-          ),
-          ul: ({ children }) => (
-            <ul className="my-3 ml-5 list-disc space-y-1.5 marker:text-muted-foreground">
-              {children}
-            </ul>
-          ),
-          // `start` is passed on: a list's first number is part of what was
-          // written. Dropping it renumbered every list from 1, and an answer
-          // that is only "12." (a list item with nothing in it, in markdown)
-          // read "1." in the chat: right answers looked wrong. The indent
-          // makes room for the widest number, or "10." lost its "1" at the
-          // message's edge and read "0." (src/lib/listIndent.ts).
-          ol: ({ children, start }) => {
-            const indent = numberedListIndent(lastListNumber(start, children));
-            return (
-              <ol
-                start={start}
-                className="my-3 ml-5 list-decimal space-y-1.5 marker:text-muted-foreground"
-                style={indent ? { marginLeft: indent } : undefined}
-              >
-                {children}
-              </ol>
-            );
-          },
-          li: ({ children }) => <li className="text-sm leading-7">{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote className="my-4 border-l-2 border-primary/50 bg-muted/40 px-4 py-2 text-sm italic text-muted-foreground">
-              {children}
-            </blockquote>
-          ),
-          hr: () => <hr className="my-6 border-border/60" />,
-          strong: ({ children }) => (
-            <strong className="font-semibold text-foreground">{children}</strong>
-          ),
-          em: ({ children }) => <em className="italic">{children}</em>,
-          table: ({ children }) => (
-            <div className="my-4 w-full overflow-x-auto rounded-lg border border-border/60">
-              <table className="w-full border-collapse text-sm">{children}</table>
-            </div>
-          ),
-          thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
-          tr: ({ children }) => (
-            <tr className="border-b border-border/40 last:border-0">{children}</tr>
-          ),
-          th: ({ children }) => (
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {children}
-            </th>
-          ),
-          td: ({ children }) => <td className="px-3 py-2 align-top text-sm">{children}</td>,
-          code: ({ className, children, ...props }) => {
-            // Inline maths: remark-math's $$ … $$ within a line.
-            if (typeof className === "string" && className.includes("math-inline")) {
-              return <MathFormula tex={extractText(children)} display={false} />;
-            }
-            // Inline code: react-markdown passes no language className for inline.
-            const isBlock = typeof className === "string" && /language-/.test(className);
-            if (!isBlock) {
-              return (
-                <code
-                  className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground/90 border border-border/40"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            // Block code is rendered inside <pre> by `pre` below; keep
-            // the hljs classes intact so highlighting still applies.
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          img: ({ src, alt }) => (
-            <RenderedImage src={typeof src === "string" ? src : ""} alt={alt || "image"} />
-          ),
-        }}
+        components={MARKDOWN_COMPONENTS}
       >
         {math ? latexDelimitersToDollars(content) : content}
       </ReactMarkdown>
     </>
   );
 }
+
+/**
+ * How each element of an answer is drawn. Defined once, here, and never inside
+ * a render: react-markdown uses each of these as the element's component, and
+ * a function made afresh on every render is, to React, a new kind of element.
+ * It threw away and rebuilt the whole answer on every redraw (a key pressed in
+ * Agent Chat's box, the page's 4-second approvals poll), so a diagram showed
+ * "Rendering diagram…" and was drawn again, and images and links flickered.
+ */
+const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => (
+    <h1 className="mt-6 mb-3 text-2xl font-semibold tracking-tight border-b border-border/60 pb-2">
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mt-6 mb-3 text-xl font-semibold tracking-tight">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mt-5 mb-2 text-base font-semibold tracking-tight">{children}</h3>
+  ),
+  h4: ({ children }) => (
+    <h4 className="mt-4 mb-2 text-sm font-semibold tracking-tight text-foreground/90">
+      {children}
+    </h4>
+  ),
+  p: ({ children }) => <p className="my-3 text-sm leading-7">{children}</p>,
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      // A link within the page (#…, such as a dashboard's #page=)
+      // stays in this tab; any other opens a new one.
+      {...(href?.startsWith("#") ? {} : { target: "_blank", rel: "noreferrer noopener" })}
+      className="text-primary underline underline-offset-2 hover:text-primary/80"
+    >
+      {children}
+    </a>
+  ),
+  ul: ({ children }) => (
+    <ul className="my-3 ml-5 list-disc space-y-1.5 marker:text-muted-foreground">{children}</ul>
+  ),
+  // `start` is passed on: a list's first number is part of what was
+  // written. Dropping it renumbered every list from 1, and an answer
+  // that is only "12." (a list item with nothing in it, in markdown)
+  // read "1." in the chat: right answers looked wrong. The indent
+  // makes room for the widest number, or "10." lost its "1" at the
+  // message's edge and read "0." (src/lib/listIndent.ts).
+  ol: ({ children, start }) => {
+    const indent = numberedListIndent(lastListNumber(start, children));
+    return (
+      <ol
+        start={start}
+        className="my-3 ml-5 list-decimal space-y-1.5 marker:text-muted-foreground"
+        style={indent ? { marginLeft: indent } : undefined}
+      >
+        {children}
+      </ol>
+    );
+  },
+  li: ({ children }) => <li className="text-sm leading-7">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-4 border-l-2 border-primary/50 bg-muted/40 px-4 py-2 text-sm italic text-muted-foreground">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-6 border-border/60" />,
+  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  table: ({ children }) => (
+    <div className="my-4 w-full overflow-x-auto rounded-lg border border-border/60">
+      <table className="w-full border-collapse text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
+  tr: ({ children }) => <tr className="border-b border-border/40 last:border-0">{children}</tr>,
+  th: ({ children }) => (
+    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => <td className="px-3 py-2 align-top text-sm">{children}</td>,
+  code: ({ className, children, ...props }) => {
+    // Inline maths: remark-math's $$ … $$ within a line.
+    if (typeof className === "string" && className.includes("math-inline")) {
+      return <MathFormula tex={extractText(children)} display={false} />;
+    }
+    // Inline code: react-markdown passes no language className for inline.
+    const isBlock = typeof className === "string" && /language-/.test(className);
+    if (!isBlock) {
+      return (
+        <code
+          className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground/90 border border-border/40"
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
+    // Block code is rendered inside <pre> by `pre` below; keep
+    // the hljs classes intact so highlighting still applies.
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  img: ({ src, alt }) => (
+    <RenderedImage src={typeof src === "string" ? src : ""} alt={alt || "image"} />
+  ),
+};
 
 /**
  * A formula, typeset by KaTeX (src/lib/markdownMath.ts). Before KaTeX has
